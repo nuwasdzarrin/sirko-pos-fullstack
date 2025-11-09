@@ -1,90 +1,141 @@
-# Tech Stack Document
+# Tech Stack Document for Sirko Point-of-Sale Application
 
-This document explains the key technologies chosen for the **codeguide-starter** project. It’s written in everyday language so anyone—technical or not—can understand why each tool was picked and how it supports the application.
+This document explains the technologies behind Sirko in plain language, so everyone—from business stakeholders to non-technical team members—can understand why each tool was chosen and how it helps the project succeed.
 
 ## 1. Frontend Technologies
-The frontend is everything the user sees and interacts with. For this project, we’ve used:
 
-- **Next.js (App Router)**
-  - A React framework that makes page routing, server-side rendering, and API routes very simple.
-  - Enhances user experience by pre-rendering pages on the server or at build time, leading to faster initial load.
-- **React 18**
-  - The underlying library for building user interfaces with reusable components.
-  - Provides a smooth, interactive experience thanks to its virtual DOM and modern hooks.
-- **TypeScript**
-  - A superset of JavaScript that adds types (labels for data).
-  - Helps catch errors early during development and makes the code easier to maintain.
-- **CSS (globals.css & theme.css)**
-  - **globals.css** applies base styles (fonts, colors, resets) across the entire app.
-  - **dashboard/theme.css** defines the look and feel specific to the dashboard area.
-  - This separation keeps styles organized and avoids accidental style conflicts.
+Our user interface is where cashiers, managers, and owners interact with Sirko. We chose tools that make development fast, interfaces consistent, and the experience snappy.
 
-By combining these tools, we have a clear structure (Next.js folders for pages and layouts), safer code (TypeScript), and flexible styling with vanilla CSS.
+- **Vue 3**
+  • A modern JavaScript framework for building interactive web pages.  
+  • Its component system lets us break the UI into reusable pieces (for example, a product card, a sales table, or a login form).
+
+- **Pinia**
+  • A lightweight state management library for Vue.  
+  • Keeps track of global data like the current user, selected branch, and active shopping cart in one place.
+
+- **Vue Router**
+  • Manages the pages and navigation flow.  
+  • Supports "route guards," so we can block unauthorized users from certain screens (e.g., only managers see stock-opname pages).
+
+- **Bootstrap**
+  • A popular CSS framework that provides ready-made styles and components (buttons, forms, tables).  
+  • Helps us keep the UI consistent and mobile-friendly without starting from scratch.
+
+- **Vite**
+  • A fast development and build tool.  
+  • Offers hot module replacement (instant updates in the browser) and bundles code efficiently for production.
+
+- **Axios (or Fetch API)**
+  • Handles communication with our backend APIs.  
+  • Simplifies sending requests (login, fetch sales data, update stock) and processing responses.
 
 ## 2. Backend Technologies
-The backend handles data, user accounts, and the logic behind the scenes. Our choices here are:
 
-- **Next.js API Routes**
-  - Allows us to write server-side code (`route.ts` files) alongside our frontend in the same project.
-  - Runs on Node.js, so we can handle requests like sign-up, sign-in, and data fetching in one place.
-- **Node.js Runtime**
-  - The JavaScript environment on the server that executes our API routes.
-- **bcrypt** (npm package)
-  - A library for hashing passwords securely before storing them.
-  - Ensures that even if someone got access to our data, raw passwords aren’t visible.
-- **(Optional) NextAuth.js or JWT**
-  - While this starter kit shows a custom authentication flow, it can easily integrate services like NextAuth.js for email-based login or JWT (JSON Web Tokens) for stateless sessions.
+The server side powers all of Sirko’s logic—authentication, data storage, and report generation. We selected a lightweight, high-performance stack.
 
-These components work together to receive user credentials, verify or store them securely, manage sessions or tokens, and deliver protected data back to the frontend.
+- **Bun**
+  • A modern JavaScript runtime like Node.js but faster startup and build times.  
+  • Runs our server code and serves static assets.
+
+- **Elysia.js**
+  • A minimal, fast web framework for Bun.  
+  • Lets us define API routes (e.g., `/api/v1/auth/login`, `/api/v1/sales`) with clear structure.
+
+- **Drizzle ORM**
+  • A TypeScript-friendly library for talking to databases.  
+  • We define our tables (users, branches, products, variants, stock, transactions) in code once and get type safety everywhere:
+     – Prevents typos in column names  
+     – Ensures our code matches the database schema  
+     – Supports SQLite out of the box
+
+- **SQLite**
+  • A file-based database that lives inside a single file (`sirko.sqlite`).  
+  • Perfect for small to medium data volumes and easy local setup—no external database server required.
+
+- **Zod**
+  • A library for validating data shapes.  
+  • We check every API request (login, stock update, sales checkout) against a schema so we only process valid data, reducing bugs.
+
+- **JSON Web Tokens (JWT)**
+  • Securely encodes user identity and role (owner, manager, cashier).  
+  • Sent with each request in an HTTP header to prove who’s making the call.
+
+- **Middleware for Role-Based Access Control (RBAC)**
+  • Server-side checks that read the JWT and allow or deny access to certain routes.  
+  • Ensures, for example, that only owners can view profit reports.
+
+- **bcrypt (or similar)**
+  • Hashes user passwords before saving them to the database.  
+  • Protects user credentials even if the database file is exposed.
 
 ## 3. Infrastructure and Deployment
-Infrastructure covers where and how we host the app, as well as how changes get delivered:
 
-- **Git & GitHub**
-  - Version control system (Git) and remote hosting (GitHub) keep track of all code changes and allow team collaboration.
-- **Vercel (or Netlify)**
-  - A popular hosting service optimized for Next.js, with one-click deployments and global content delivery.
-  - Automatically rebuilds and deploys the site whenever code is pushed to the main branch.
-- **GitHub Actions (CI/CD)**
-  - Automates tasks like linting (ESLint), formatting (Prettier), and running any tests you add.
-  - Ensures that only clean, tested code goes live.
+We want Sirko to be reliable, easy to set up, and ready for growth. Here’s how we manage deployment and day-to-day operations.
 
-Together, these tools provide a reliable, scalable setup where every code change is tested and deployed quickly, with minimal manual work.
+- **Git & GitHub (or GitLab)**
+  • Version control for tracking code changes and collaborating.  
+  • Pull requests, code reviews, and branch protection ensure quality.
+
+- **Docker & Docker Compose**
+  • Encapsulate the entire application (Bun/Elysia server + SQLite) in containers.  
+  • `docker-compose.yaml` spins up everything with one command, making local setup identical for all developers.
+
+- **Multi-Stage Dockerfile**
+  • Builds the Vue frontend and then packages it into the same container as the Bun server.  
+  • Produces a single, lightweight image for production.
+
+- **Environment Variables (`.env` files)**
+  • Stores secrets (JWT secret, database path) and configuration outside of code.  
+  • Keeps sensitive data out of version control.
+
+- **CI/CD Pipeline (GitHub Actions)**
+  • Automated checks on every push: linting code, running unit tests, building the Docker image.  
+  • Deploys to staging or production when changes are merged to main.
+
+- **Hosting Platform**
+  • Any Docker-compatible service (e.g., AWS ECS, DigitalOcean App Platform, or a virtual server).  
+  • Ensures easy scaling and reliable uptime.
 
 ## 4. Third-Party Integrations
-While this starter kit is minimal by design, it already includes or can easily add:
 
-- **bcrypt**
-  - For secure password hashing (included as an npm dependency).
-- **NextAuth.js** (optional)
-  - A full-featured authentication library supporting email/password, OAuth, and more.
-- **Sentry or LogRocket** (optional)
-  - For real-time error tracking and performance monitoring in production.
+Sirko keeps external dependencies minimal, focusing on core business needs. Currently, we integrate only a few key services:
 
-These integrations help extend the app’s capabilities without building every feature from scratch.
+- **Email Service (optional)**
+  • For sending password resets or notifications, if needed.  
+  • Example: SendGrid or Mailgun.
+
+- **CSV Export**
+  • Users can download reports as CSV files for offline analysis or sharing.
+
+- **Logging & Error Tracking (optional)**
+  • Services like Sentry can be plugged in to capture runtime errors and performance issues.
 
 ## 5. Security and Performance Considerations
-We’ve baked in several measures to keep users safe and the app running smoothly:
 
-Security:
-- Passwords are never stored in plain text—bcrypt hashes them with a random salt.
-- API routes can implement CSRF protection and input validation to block malicious requests.
-- Session tokens or cookies are marked secure and HttpOnly to prevent theft via JavaScript.
+We built Sirko to keep data safe and the user experience smooth.
 
-Performance:
-- Server-side rendering (SSR) and static site generation (SSG) in Next.js deliver pages faster.
-- Code splitting and lazy-loaded components ensure users only download what they need.
-- Global CSS and theme files are small and cached by the browser for quick repeat visits.
+### Security Measures
+- **Password Hashing**: Uses bcrypt to store only hashed passwords.  
+- **JWT Secrets**: Kept out of code in environment variables.  
+- **RBAC Middleware**: Validates user roles on every protected route.  
+- **Input Validation**: Zod checks every incoming request body.  
+- **HTTPS/TLS**: Production deployments must run behind TLS for encrypted transport.
 
-These strategies work together to give users a fast, secure experience every time.
+### Performance Optimizations
+- **Fast Runtime**: Bun offers quicker startup and lower memory usage than traditional runtimes.  
+- **SQLite Write-Ahead Logging (WAL)**: Improves concurrent reads and writes without locking the entire database.  
+- **Atomic Transactions**: Drizzle ORM wraps critical operations (sales checkout, stock updates) in transactions to maintain data consistency.  
+- **Code Splitting & Minification**: Vite reduces frontend bundle size for faster page loads.  
+- **Docker Layer Caching**: Speeds up CI builds by reusing unchanged layers.
 
 ## 6. Conclusion and Overall Tech Stack Summary
-In building **codeguide-starter**, we chose technologies that:
 
-- Align with modern web standards (Next.js, React, TypeScript).
-- Provide a clear, file-based project structure for rapid onboarding.
-- Offer built-in support for server-side rendering, API routes, and static assets.
-- Emphasize security through password hashing, session management, and safe defaults.
-- Enable easy scaling and future enhancements via modular code and optional integrations.
+Sirko’s technology choices balance speed, simplicity, and maintainability:
 
-This stack strikes a balance between simplicity for newcomers and flexibility for experienced teams. It accelerates development of a secure authentication flow and a polished dashboard, while leaving room to plug in databases, test suites, and advanced features as the project grows.
+- On the **frontend**, Vue 3 with Pinia, vue-router, and Bootstrap delivers a consistent, responsive user interface.
+- On the **backend**, Bun and Elysia.js provide a lightweight, high-performance server, with Drizzle ORM and SQLite ensuring a type-safe, file-based database.
+- Our **infrastructure**—Docker, GitHub Actions, multi-stage builds—makes development and deployment repeatable and scalable.
+- **Security** is enforced through JWT, role-based middleware, password hashing, and input validation, while **performance** is boosted by WAL mode, atomic transactions, and Bun’s fast runtime.
+
+Unique to Sirko is the combination of a cutting-edge JavaScript runtime (Bun) with a file-based database (SQLite) and type-safe ORM (Drizzle)—all packaged into a single Docker image. This approach ensures a smooth developer experience, easy onboarding for new team members, and a robust, maintainable application for your end users.

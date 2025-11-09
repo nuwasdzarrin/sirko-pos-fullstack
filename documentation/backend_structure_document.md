@@ -1,179 +1,211 @@
-# Backend Structure Document
+# Sirko POS Backend Structure Document
 
-This document outlines the backend architecture, hosting, and infrastructure for the **codeguide-starter** project. It uses plain language so anyone can understand how the backend is set up and how it supports the application.
+This document outlines the backend setup for Sirko, a multi-branch point-of-sale system. It covers architecture, database design, APIs, hosting, infrastructure, security, monitoring, and maintenance in clear, everyday language.
 
 ## 1. Backend Architecture
 
-- **Framework and Design Pattern**
-  - We use **Next.js API Routes** to handle all server-side logic. These routes live alongside the frontend code in the same repository, making development and deployment simpler.
-  - The backend follows a **layered pattern**:
-    1. **API Layer**: Receives requests (login, registration, data fetch).  
-    2. **Service Layer**: Contains the core business logic (user validation, password hashing).  
-    3. **Data Access Layer**: Talks to the database via a simple ORM (e.g., Prisma or TypeORM).
+Overall, Sirko’s backend is a single server application written in JavaScript/TypeScript, running on the Bun runtime with the Elysia.js framework. It follows a clear separation of concerns and modular design:
 
-- **Scalability**
-  - Stateless API routes can scale horizontally—new instances can spin up on demand.  
-  - We can add caching or a message queue (e.g., Redis or RabbitMQ) without changing the core code.
+• Monolithic structure with logical modules (authentication, inventory, sales, reporting).  
+• Elysia.js for defining routes, middleware, and request handling.  
+• Drizzle ORM for type-safe database access.  
+• Zod schemas for validating incoming data.  
 
-- **Maintainability**
-  - Code for each feature is grouped by route (authentication, dashboard).  
-  - A service layer separates complex logic from request handling.
+This setup supports scalability by:
 
-- **Performance**
-  - Lightweight Node.js handlers keep response times low.  
-  - Future use of database connection pooling and Redis for caching repeated queries.
+• Running multiple container instances behind a load balancer.  
+• Using a lightweight runtime (Bun) for high throughput and low memory usage.  
+
+It supports maintainability by:
+
+• Organizing code into small, focused folders (`/api/v1`, `/db`, `/lib`, `/services`).  
+• Keeping business logic in separate service files instead of in route handlers.  
+• Using TypeScript types from Drizzle and Zod to catch errors early.  
+
+It supports performance by:
+
+• Leveraging Bun’s fast JavaScript engine and built-in HTTP server.  
+• Enabling SQLite’s Write-Ahead Logging (WAL) for concurrent reads/writes.  
 
 ## 2. Database Management
 
-- **Database Choice**
-  - We recommend **PostgreSQL** for structured data and reliable transactions.  
-  - In-memory caching can be added later with **Redis** for session tokens or frequently read data.
+Sirko uses a relational SQL database stored as a local SQLite file. We manage data with Drizzle ORM for its TypeScript support and ease of migration.
 
-- **Data Storage and Access**
-  - Use an ORM like **Prisma** or **TypeORM** to map JavaScript/TypeScript objects to database tables.
-  - Connection pooling ensures efficient use of database connections under load.
-  - Migrations track schema changes over time, keeping development, staging, and production in sync.
+• **Type**: SQL (lightweight file-based SQLite).  
+• **Library**: Drizzle ORM handles connections, queries, and migrations.  
+• **Concurrency**: WAL mode enabled to allow multiple users to read/write concurrently.  
+• **Backups**: Regular export of the `.sqlite` file or using `sqlite3 .backup` commands.  
 
-- **Data Practices**
-  - Passwords are never stored in plain text—they are salted and hashed with **bcrypt** before saving.
-  - All outgoing data is typed and validated to prevent malformed records.
+Data is structured into clear tables (see Schema section). Drizzle automatically generates type definitions so developers can work with typed objects. Regular database migrations keep schema changes in sync across environments.
 
 ## 3. Database Schema
 
+Below is a human-readable overview, followed by SQL statements to create each table.
+
 ### Human-Readable Format
 
-- **Users**
-  - **id**: Unique identifier  
-  - **email**: User’s email address (unique)  
-  - **password_hash**: Securely hashed password  
-  - **created_at**: Account creation timestamp
+• **users**: Registered system users (Owners, Managers, Cashiers). Includes email, password hash, role, and branch association.  
+• **branches**: Physical store locations. Linked to users, stock, and sales.  
+• **products**: Items available for sale (e.g., “Coffee Mug”).  
+• **product_variants**: Variations of a product (e.g., size, color). Each has its own price and SKU.  
+• **branch_stock**: Inventory levels of each variant at each branch.  
+• **sales_transactions**: Completed sales, with timestamp, cashier, branch, and total amount.  
+• **sales_items**: Line items for each sale, linking transactions to specific product variants and quantities.  
 
-- **Sessions**
-  - **id**: Unique session record  
-  - **user_id**: Links to a user  
-  - **token**: Random string for authentication  
-  - **expires_at**: When the token stops working  
-  - **created_at**: When the session was created
+### SQL Schema (SQLite Format)
 
-- **DashboardItems** *(optional for dynamic data)*
-  - **id**: Unique record  
-  - **title**: Item title  
-  - **content**: Item details  
-  - **created_at**: When the item was added
-
-### SQL Schema (PostgreSQL)
 ```sql
--- Users table
-CREATE TABLE users (
-  id SERIAL PRIMARY KEY,
-  email VARCHAR(255) UNIQUE NOT NULL,
-  password_hash VARCHAR(255) NOT NULL,
-  created_at TIMESTAMPTZ DEFAULT now()
+-- users table
+ecreate table if not exists users (
+  id integer primary key autoincrement,
+  email text not null unique,
+  password_hash text not null,
+  role text not null check(role in ('owner','manager','cashier')),
+  branch_id integer not null references branches(id),
+  created_at datetime default current_timestamp
 );
 
--- Sessions table
-CREATE TABLE sessions (
-  id SERIAL PRIMARY KEY,
-  user_id INT REFERENCES users(id) ON DELETE CASCADE,
-  token VARCHAR(255) UNIQUE NOT NULL,
-  expires_at TIMESTAMPTZ NOT NULL,
-  created_at TIMESTAMPTZ DEFAULT now()
+-- branches table
+create table if not exists branches (
+  id integer primary key autoincrement,
+  name text not null,
+  location text,
+  created_at datetime default current_timestamp
 );
 
--- Dashboard items table
-CREATE TABLE dashboard_items (
-  id SERIAL PRIMARY KEY,
-  title TEXT NOT NULL,
-  content TEXT,
-  created_at TIMESTAMPTZ DEFAULT now()
+-- products table
+create table if not exists products (
+  id integer primary key autoincrement,
+  name text not null,
+  description text,
+  created_at datetime default current_timestamp
 );
-```  
+
+-- product_variants table
+create table if not exists product_variants (
+  id integer primary key autoincrement,
+  product_id integer not null references products(id),
+  sku text unique not null,
+  price integer not null,
+  created_at datetime default current_timestamp
+);
+
+-- branch_stock table
+create table if not exists branch_stock (
+  id integer primary key autoincrement,
+  branch_id integer not null references branches(id),
+  variant_id integer not null references product_variants(id),
+  quantity integer not null,
+  updated_at datetime default current_timestamp,
+  unique(branch_id, variant_id)
+);
+
+-- sales_transactions table
+create table if not exists sales_transactions (
+  id integer primary key autoincrement,
+  branch_id integer not null references branches(id),
+  cashier_id integer not null references users(id),
+  total_amount integer not null,
+  created_at datetime default current_timestamp
+);
+
+-- sales_items table
+create table if not exists sales_items (
+  id integer primary key autoincrement,
+  transaction_id integer not null references sales_transactions(id),
+  variant_id integer not null references product_variants(id),
+  quantity integer not null,
+  price_at_sale integer not null
+);
+```
 
 ## 4. API Design and Endpoints
 
-- **Approach**: We follow a **RESTful** style, grouping related endpoints under `/api` directories.
+Sirko’s API follows RESTful conventions under the `/api/v1` prefix. All endpoints expect and return JSON.
 
-- **Key Endpoints**
-  - `POST /api/auth/register`  
-    • Accepts `{ email, password }`  
-    • Creates a new user and issues a session token  
-  - `POST /api/auth/login`  
-    • Accepts `{ email, password }`  
-    • Verifies credentials and returns a session token  
-  - `POST /api/auth/logout`  
-    • Invalidates the session token on the server  
-  - `GET /api/dashboard/data`  
-    • Requires a valid session  
-    • Returns user-specific data or dashboard items  
+### Authentication (`/api/v1/auth`)
 
-- **Communication**
-  - Frontend sends JSON requests; backend replies with JSON and appropriate HTTP status codes.  
-  - Protected routes check for a valid session token (in cookies or Authorization header).
+• **POST /login**: User submits email/password. Returns a JWT on success.  
+• **POST /refresh**: Exchange a refresh token for a new access token.  
+• **GET /me**: Returns the logged-in user’s profile and role.  
+
+### Inventory (`/api/v1/inventory`)
+
+• **GET /branches**: List all branches.  
+• **GET /products**: List all products and variants.  
+• **GET /branches/:id/stock**: View stock levels for a branch.  
+• **POST /branches/:id/stock/opname**: Adjust stock counts after a physical inventory check.  
+
+### Sales (`/api/v1/sales`)
+
+• **POST /**: Create a new sales transaction (cashier, branch, items).  
+• **GET /**: List transactions, filterable by date or branch.  
+• **GET /:id**: Get details of a specific transaction.  
+
+### Reporting (`/api/v1/reports`)
+
+• **GET /sales**: Summarize sales over a period.  
+• **GET /profit**: Calculate profits by branch or time frame.  
+• **GET /stock-movements**: Show history of stock changes.  
+
+All endpoints run incoming data through Zod validation. Protected routes require a valid JWT in the `Authorization` header. Role-based middleware ensures only authorized users can access certain actions (e.g., only Managers can run stock opname, only Owners can view profit reports).
 
 ## 5. Hosting Solutions
 
-- **Cloud Provider**:  
-  - **Vercel** (recommended) offers seamless Next.js deployments, auto-scaling, and built-in CDN.  
-  - Alternatively, **Netlify** or any Node.js-capable host will work.
+For both development and production, Sirko is containerized with Docker:
 
-- **Benefits**
-  - **Reliability**: Global servers and failover across regions.  
-  - **Scalability**: Auto-scale serverless functions based on traffic.  
-  - **Cost-Effectiveness**: Pay-per-use model means low cost for small projects.
+• **Local Development**: Docker Compose defines services for the Bun/Elysia server and mounts a volume for the SQLite file.  
+• **Production**: A multi-stage Dockerfile builds the Vue frontend, then serves static files via the Bun/Elysia container. The single image can run anywhere Docker is supported.  
+
+You can deploy to any container host, such as:
+
+• AWS ECS or Fargate  
+• DigitalOcean App Platform  
+• Kubernetes cluster  
+
+Benefits:
+
+• **Reliability**: Containers ensure the same environment everywhere.  
+• **Scalability**: Spin up multiple instances behind a load balancer.  
+• **Cost-Effectiveness**: Run on small instances or serverless containers to match demand.
 
 ## 6. Infrastructure Components
 
-- **Load Balancer**
-  - Provided by the hosting platform—distributes API requests across function instances.
+• **Load Balancer**: Distributes incoming HTTP traffic across container instances (e.g., AWS ALB, Nginx).  
+• **Reverse Proxy**: Nginx or built-in Bun proxy for routing and SSL termination.  
+• **Content Delivery Network (CDN)**: Serve static assets (Vue bundle) via Cloudflare or AWS CloudFront for faster global delivery.  
+• **Cache**: Optional in-memory cache (e.g., LRU cache in Bun) for hot lookups like product lists.  
+• **Logging**: Pino or Bun’s logger streams logs to stdout, with aggregation via ELK stack or a managed service (Logflare).  
 
-- **CDN (Content Delivery Network)**
-  - Vercel’s global edge network caches static assets (CSS, JS, images) for faster page loads.
-
-- **Caching**
-  - **Redis** (optional) for session storage or caching dashboard queries to reduce database load.
-
-- **Object Storage**
-  - For file uploads or backups, integrate with AWS S3 or similar services.
-
-- **Message Queue**
-  - In future, use **RabbitMQ** or **Kafka** for background tasks (e.g., email notifications).
+These components work together to ensure fast, reliable responses and a responsive user experience.
 
 ## 7. Security Measures
 
-- **Authentication & Authorization**
-  - Passwords hashed with **bcrypt** and salted.  
-  - Session tokens stored in secure, HttpOnly cookies or Authorization headers.  
-  - Protected endpoints verify tokens before proceeding.
+• **HTTPS everywhere**: SSL/TLS is enforced at the load balancer or reverse proxy.  
+• **JWT Authentication**: Stateles tokens with short expiration and refresh flows.  
+• **Role-Based Access Control (RBAC)**: Middleware checks user role embedded in JWT before allowing certain actions.  
+• **Data Validation**: Zod schemas prevent malformed or malicious input.  
+• **Environment Variables**: Secrets (`JWT_SECRET`, database path) stored outside code in `.env` files or managed services (AWS Parameter Store).  
+• **Database Encryption**: Host-level disk encryption protects the SQLite file at rest.  
 
-- **Data Encryption**
-  - **HTTPS/TLS** encrypts data in transit.  
-  - Database connections use SSL to encrypt data between the app and the database.
-
-- **Input Validation**
-  - Every incoming request is validated (e.g., valid email format, password length) to prevent SQL injection or other attacks.
-
-- **Web Security Best Practices**
-  - Enable **CORS** policies to limit allowed origins.  
-  - Use **CSRF tokens** or same-site cookies to prevent cross-site requests.  
-  - Set secure headers with **Helmet** or a similar middleware.
+Together, these guard against unauthorized access, protect user data, and help meet compliance needs.
 
 ## 8. Monitoring and Maintenance
 
-- **Performance Monitoring**
-  - Integrate **Sentry** or **LogRocket** for real-time crash reporting and performance tracing.  
-  - Use Vercel’s built-in analytics to track request latencies and error rates.
+• **Health Checks**: A `/health` endpoint returns service status.  
+• **Metrics**: Bun’s performance metrics or integration with Prometheus to track request rates, error rates, and latency.  
+• **Error Tracking**: Sentry or similar service captures runtime errors and stack traces.  
+• **Automated Tests**:  
+  – Unit tests (Vitest) for service logic.  
+  – Integration tests for API + database.  
+  – End-to-end tests (Playwright/Cypress) for key user flows.  
+• **CI/CD Pipeline**: GitHub Actions or similar runs tests, builds Docker images, and deploys to staging/production.  
+• **Database Migrations**: Drizzle migrations run automatically on deploy to keep schema in sync.  
 
-- **Logging**
-  - Structured logs (JSON) for all API requests and errors, shipped to a log management service like **Datadog** or **Logflare**.
-
-- **Health Checks**
-  - Define a `/health` endpoint that returns a 200 status if the service is up and the database is reachable.
-
-- **Maintenance Strategies**
-  - Automated migrations run on deploy to keep the database schema up to date.  
-  - Scheduled dependency audits and security scans (e.g., `npm audit`).
-  - Regular backups of the database (daily or weekly depending on usage).
+Regular maintenance tasks include dependency updates, reviewing logs for errors, and rotating secrets.
 
 ## 9. Conclusion and Overall Backend Summary
 
-The backend for **codeguide-starter** is built on Next.js API Routes and Node.js, paired with PostgreSQL for data and optional Redis for caching. It follows a clear layered architecture that keeps code easy to maintain and extend. With RESTful endpoints for authentication and data, secure practices like password hashing and HTTPS, and hosting on Vercel for scalability and global performance, this setup meets the project’s goals for a fast, secure, and developer-friendly foundation. Future enhancements—such as background job queues, advanced monitoring, or richer data models—can be added without disrupting the core structure.
+Sirko’s backend is a modern, containerized application built on Bun and Elysia.js. It pairs a type-safe data layer (Drizzle ORM + SQLite) with clear, versioned APIs secured by JWT and RBAC. Modular design, automated testing, and containerization make it maintainable and scalable. Infrastructure components like load balancers, CDNs, and monitoring tools ensure reliability and performance.
+
+This setup aligns with Sirko’s goals: fast development, secure multi-branch support, precise inventory control, and insightful reporting. By following these guidelines, you’ll have a robust backend that grows with your business and keeps your users—and data—safe.
