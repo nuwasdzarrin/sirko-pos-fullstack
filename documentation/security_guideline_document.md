@@ -1,116 +1,202 @@
-# Security Guidelines for codeguide-starter
+# Security Guidelines for Sirko POS Fullstack
 
-This document defines mandatory security principles and implementation best practices tailored to the **codeguide-starter** repository. It aligns with Security-by-Design, Least Privilege, Defense-in-Depth, and other core security tenets. All sections reference specific areas of the codebase (e.g., `/app/api/auth/route.ts`, CSS files, environment configuration) to ensure practical guidance.
+This document provides security best practices tailored to the Sirko POS full-stack application (Bun + Elysia.js backend, SQLite + Drizzle ORM, Vue 3 + Pinia frontend). It aligns with core security principles—Security by Design, Least Privilege, Defense in Depth—and addresses specific implementation areas.
 
 ---
 
 ## 1. Security by Design
 
-• Embed security from day one: review threat models whenever adding new features (e.g., new API routes, data fetching).
-• Apply “secure defaults” in Next.js configuration (`next.config.js`), enabling strict mode and disabling debug flags in production builds.
-• Maintain a security checklist in your PR template to confirm that each change has been reviewed against this guideline.
-
----
+- Integrate security reviews at every milestone (design, implementation, testing, deployment).  
+- Define threat models for authentication flows, transaction processing, reporting endpoints.  
+- Mandate code reviews with a security checklist before merging.
 
 ## 2. Authentication & Access Control
 
-### 2.1 Password Storage
-- Use **bcrypt** (or Argon2) with a per-user salt to hash passwords in `/app/api/auth/route.ts`.
-- Enforce a strong password policy on both client and server: minimum 12 characters, mixed case, numbers, and symbols.
+### 2.1 Robust Authentication
 
-### 2.2 Session Management
-- Issue sessions via Secure, HttpOnly, SameSite=strict cookies. Do **not** expose tokens to JavaScript.
-- Implement absolute and idle timeouts. For example, invalidate sessions after 30 minutes of inactivity.
-- Protect against session fixation by regenerating session IDs after authentication.
+- Use JWTs signed with a strong HMAC (e.g., HS256) or RSA/ECDSA algorithm—never `none`.  
+- Store `JWT_SECRET` (or private keys) in a secure vault or environment variable (no hard-coding).  
+- Enforce short token lifetimes (e.g., 15 min access, 7 d refresh).  
 
-### 2.3 Brute-Force & Rate Limiting
-- Apply rate limiting at the API layer (e.g., using `express-rate-limit` or Next.js middleware) on `/api/auth` to throttle repeated login attempts.
-- Introduce exponential backoff or temporary lockout after N failed attempts.
+### 2.2 Password Security
 
-### 2.4 Role-Based Access Control (Future)
-- Define user roles in your database model (e.g., `role = 'user' | 'admin'`).
-- Enforce server-side authorization checks in every protected route (e.g., in `dashboard/layout.tsx` loader functions).
+- Require minimum length (≥ 12 chars), complexity, and rotation policies.  
+- Hash passwords with Argon2 or bcrypt (unique salt per user).  
+- Throttle failed login attempts (e.g., 5 tries per 15 min).  
+
+### 2.3 Session & Token Management
+
+- Validate `exp` and `nbf` claims on every request.  
+- Reject tokens with invalid signatures or malformed payloads.  
+- Provide logout endpoint to revoke refresh tokens (maintain a revocation list).  
+
+### 2.4 Role‐Based Access Control (RBAC)
+
+- Define roles (`owner`, `manager`, `cashier`) and map to permissions.  
+- Implement Elysia middleware to extract the JWT, verify it, and attach `ctx.user` with role.  
+- Enforce authorization checks at every protected route, e.g.:  
+  - Only `manager` can adjust stock.  
+  - Only `owner` can access profit reports.  
+
+### 2.5 Multi‐Factor Authentication (Optional)
+
+- For high‐privilege roles (`owner`), offer TOTP or SMS-based MFA.  
+- Store MFA secrets encrypted at rest and require OTP verification upon login.
 
 ---
 
 ## 3. Input Handling & Processing
 
-### 3.1 Validate & Sanitize All Inputs
-- On **client** (`sign-up/page.tsx`, `sign-in/page.tsx`): perform basic format checks (email regex, password length).
-- On **server** (`/app/api/auth/route.ts`): re-validate inputs with a schema validator (e.g., `zod`, `Joi`).
-- Reject or sanitize any unexpected fields to prevent injection attacks.
+### 3.1 Validation & Sanitization
+
+- Use Zod schemas in each Elysia route to validate `body`, `params`, and `query`.  
+- Reject requests with unexpected or missing fields (fail securely with HTTP 400).  
 
 ### 3.2 Prevent Injection
-- If you introduce a database later, always use parameterized queries or an ORM (e.g., Prisma) rather than string concatenation.
-- Avoid dynamic `eval()` or template rendering with unsanitized user input.
 
-### 3.3 Safe Redirects
-- When redirecting after login or logout, validate the target against an allow-list to prevent open redirects.
+- Leverage Drizzle ORM’s parameterized queries for all database access.  
+- Never interpolate user input into raw SQL.  
+- Validate numeric IDs, date ranges, and text fields against strict patterns.  
+
+### 3.3 Cross‐Site Scripting (XSS)
+
+- On the Vue client, escape or sanitize any user‐provided content before rendering.  
+- Enable a strict Content Security Policy (CSP) in HTTP headers:  
+  ```http
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'sha256-...';
+  ```  
+
+### 3.4 Redirects & File Uploads
+
+- If using dynamic redirects, validate URLs against a whitelist of trusted domains.  
+- File uploads (e.g., product images):  
+  - Allow only specific MIME types (PNG, JPEG).  
+  - Scan for malware if possible.  
+  - Store outside webroot or use presigned URLs on a storage service.  
+  - Restrict file names (no path traversal).  
 
 ---
 
 ## 4. Data Protection & Privacy
 
-### 4.1 Encryption & Secrets
-- Enforce HTTPS/TLS 1.2+ for all front-end ↔ back-end communications.
-- Never commit secrets—use environment variables and a secrets manager (e.g., AWS Secrets Manager, Vault).
+### 4.1 Encryption in Transit
 
-### 4.2 Sensitive Data Handling
-- Do ​not​ log raw passwords, tokens, or PII in server logs. Mask or redact any user identifiers.
-- If storing PII in `data.json` or a future database, classify it and apply data retention policies.
+- Enforce HTTPS/TLS 1.2+ for all client↔server and server↔db communications (if remote).  
+- Configure HSTS (`Strict-Transport-Security` header) on the Bun/Elysia server.
+
+### 4.2 Encryption at Rest
+
+- SQLite file: consider OS‐level encryption or SQLite Encryption Extension (SEE).  
+- Encrypt backups before moving them off-site.
+
+### 4.3 Secrets Management
+
+- Store secrets (JWT keys, database paths) in environment variables or a secrets manager (Vault, AWS SM).  
+- Do not commit `.env` with real values.  
+
+### 4.4 Logging & Error Handling
+
+- Log high‐level events (login success/failure, stock changes) with minimal PII.  
+- On failures, return generic error messages (e.g., “Invalid credentials”)—no stack traces.  
+- Protect log access with RBAC and rotate logs regularly.
 
 ---
 
 ## 5. API & Service Security
 
-### 5.1 HTTPS Enforcement
-- In production, redirect all HTTP traffic to HTTPS (e.g., via Vercel’s redirect rules or custom middleware).
+### 5.1 Rate Limiting & Throttling
 
-### 5.2 CORS
-- Configure `next.config.js` or API middleware to allow **only** your front-end origin (e.g., `https://your-domain.com`).
+- Apply IP‐based or user‐based rate limits on authentication and transaction endpoints.  
+- Use an in‐memory store (Redis) or a Bun‐compatible plugin for throttling.
 
-### 5.3 API Versioning & Minimal Exposure
-- Version your API routes (e.g., `/api/v1/auth`) to handle future changes without breaking clients.
-- Return only necessary fields in JSON responses; avoid leaking internal server paths or stack traces.
+### 5.2 CORS Configuration
+
+- Restrict allowed origins to your frontend domain(s).  
+- Enable only required methods (`GET, POST, PUT, DELETE`) and headers (`Authorization, Content-Type`).
+
+### 5.3 Versioning & HTTP Verbs
+
+- Namespace APIs under `/api/v1/...`.  
+- Use correct verbs: `GET` for reads, `POST` for creation, `PUT/PATCH` for updates, `DELETE` for removals.
+
+### 5.4 Least Privilege on Services
+
+- Database user: grant only necessary permissions (no DROP or ALTER in production).  
+- Container user: run processes as non-root inside Docker.
 
 ---
 
-## 6. Web Application Security Hygiene
+## 6. Frontend Security Hygiene
 
-### 6.1 CSRF Protection
-- Use anti-CSRF tokens for any state-changing API calls. Integrate Next.js CSRF middleware or implement synchronizer tokens stored in cookies.
+### 6.1 Secure Storage of Tokens
+
+- Avoid `localStorage` for JWT.  
+- Prefer `HttpOnly`, `Secure`, `SameSite=Strict` cookies for the access token.  
+- Protect CSRF with synchronizer tokens or double-submit cookie pattern.
 
 ### 6.2 Security Headers
-- In `next.config.js` (or a custom server), add these headers:
-  - `Strict-Transport-Security: max-age=63072000; includeSubDomains; preload`
-  - `X-Content-Type-Options: nosniff`
-  - `X-Frame-Options: DENY`
-  - `Referrer-Policy: no-referrer-when-downgrade`
-  - `Content-Security-Policy`: restrict script/style/src to self and trusted CDNs.
 
-### 6.3 Secure Cookies
-- Set `Secure`, `HttpOnly`, `SameSite=Strict` on all cookies. Avoid storing sensitive data in `localStorage`.
+- `X-Content-Type-Options: nosniff`  
+- `X-Frame-Options: DENY`  
+- `Referrer-Policy: no-referrer`  
+- `Permissions-Policy` to limit browser features.
 
-### 6.4 Prevent XSS
-- Escape or encode all user-supplied data in React templates. Avoid `dangerouslySetInnerHTML` unless content is sanitized.
+### 6.3 Subresource Integrity (SRI)
+
+- If loading external scripts or styles (e.g., Bootstrap CDN), include integrity hashes.
+
+### 6.4 Disable Debug in Production
+
+- Remove verbose logs, Vue devtools hooks, and any debug flags in the production build.
 
 ---
 
-## 7. Infrastructure & Configuration Management
+## 7. Infrastructure & Configuration
 
-- Harden your hosting environment (e.g., Vercel/Netlify) by disabling unnecessary endpoints (GraphQL/GraphiQL playgrounds in production).
-- Rotate secrets and API keys regularly via your secrets manager.
-- Maintain minimal privileges: e.g., database accounts should only have read/write on required tables.
-- Keep Node.js, Next.js, and all system packages up to date.
+### 7.1 Docker Hardening
+
+- Use official, minimal Bun/Elysia and SQLite base images.  
+- Multi-stage builds: final image contains only compiled assets and runtime.  
+- Scan container images for vulnerabilities (Trivy, Clair).
+
+### 7.2 Network & Firewall
+
+- Expose only necessary ports (e.g., 443 for HTTPS).  
+- Place database (SQLite file) outside the network boundary if remote; if shared, restrict directory permissions.
+
+### 7.3 TLS & Cipher Suites
+
+- Disable weak ciphers and protocols (SSLv3, TLS 1.0/1.1).  
+- Enable strong cipher suites (AES GCM, ECDHE).  
+
+### 7.4 Configuration Management
+
+- Keep configurations in version control (excluding secrets).  
+- Use environment-specific `.env` files with secure defaults.
 
 ---
 
 ## 8. Dependency Management
 
-- Commit and maintain `package-lock.json` to guarantee reproducible builds.
-- Integrate a vulnerability scanner (e.g., GitHub Dependabot, Snyk) to monitor and alert on CVEs in dependencies.
-- Trim unused packages; each added library increases the attack surface.
+- Maintain a lockfile (`package-lock.json`).  
+- Regularly run SCA tools to detect vulnerable dependencies.  
+- Update Bun, Elysia, Vue, Drizzle ORM, Zod, and Bootstrap to patch versions promptly.  
+- Avoid unnecessary packages—minimize attack surface.
 
 ---
 
-Adherence to these guidelines will ensure that **codeguide-starter** remains secure, maintainable, and resilient as it evolves. Regularly review and update this document to reflect new threats and best practices.
+## 9. DevOps & CI/CD Security
+
+- Integrate SAST (ESLint security plugins), DAST (API fuzzing), and SCA into pipelines.  
+- Store CI/CD tokens and secrets in a vault—grant pipelines least privilege.  
+- Automate security and unit tests; require passing build and security checks for merge.
+
+---
+
+## 10. Continuous Improvement
+
+- Schedule periodic security audits and penetration tests.  
+- Monitor logs and metrics for anomalous activity.  
+- Update threat model and run tabletop exercises after significant feature additions or changes.
+
+By following these guidelines, Sirko will achieve a robust security posture, protect sensitive data, and build trust with users across all branches and roles.
